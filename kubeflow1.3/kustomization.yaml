@@ -66,6 +66,10 @@ resources:
 # - https://github.com/kubeflow/manifests/common/user-namespace/base
 
 patches:
+  - path: mpi-op-deployment.json
+    target:
+      kind: Deployment
+      name: mpi-operator
   - path: ./kfserving-config-patch.yaml
     target:
       group: ""
@@ -79,4 +83,10 @@ patches:
       version: v1
       kind: ConfigMap
       name: inferenceservice-config
-      namespace: kubeflow      
+      namespace: kubeflow    
+  - path: cert-manager-version.json
+    target:
+      kind: Certificate  
+  - path: cert-manager-version.json
+    target:
+      kind: Issuer 

@@ -4,10 +4,15 @@ This guides helps you set up Kubeflow 1.3 in an existing environment.
 We assume that that the following operators are installed:
 
 * [Red Hat ServiceMesh](https://docs.openshift.com/container-platform/4.7/service_mesh/v2x/installing-ossm.html)
+  * Jaeger
+  * Kiali
+  * ServiceMesh
+    * Create a basic Service Mesh Control Plane
 * [cert-manager](https://cert-manager.io/docs/installation/openshift/)
-* [Red Hat Serverless](https://docs.openshift.com/container-platform/4.7/serverless/admin_guide/installing-openshift-serverless.html)
 * [namespace-configuration-operator](https://github.com/redhat-cop/namespace-configuration-operator)
 * [gatekeeper-operator](https://github.com/gatekeeper/gatekeeper-operator)
+* [Red Hat Serverless](https://docs.openshift.com/container-platform/4.7/serverless/admin_guide/installing-openshift-serverless.html)
+  * Knative Serving component
 * [proactive-node-autoscaling](https://github.com/redhat-cop/proactive-node-scaling-operator)
 
 We assume that there is a ServiceMesh control plane fully dedicated to the Kubeflow workloads.
@@ -39,7 +44,7 @@ This approach also assumes that the data lake is on AWS S3 and sets up transpare
 | transparent data lake access: AWS STS Integration | done |
 | kubeflow pipelines | done |
 
-## Enable GPUs and node autoscaling
+## Enable GPUs and node autoscaling (OPTIONAL)
 
 We assume that nfd operator and gpu operator are correctly installed.
 We assume that gpu-enabled nodes are provisioned and tainted with:
@@ -96,6 +101,7 @@ oc apply -f ./openshift/ai-ml-watermark.yaml
 ## Patch the service mesh for Kubeflow SSO
 
 ```shell
+## Not used and removed from sm_cp_patch.yaml 
 export allowed_cidrs_csv=$(curl --no-progress-meter https://ip-ranges.amazonaws.com/ip-ranges.json | jq -r '.prefixes[] | select(.region=="us-east-2" or .region=="us-east-1" or .region=="us-west-1" or .region=="us-west-2") | select(.service=="S3" or .service=="AMAZON") | .ip_prefix' | awk -vORS=, '{print $1}' | sed 's/,$/\n/')
 export sm_cp_namespace=istio-system #change based on your settings
 export sm_cp_name=basic #change
@@ -111,11 +117,11 @@ oc label namespace knative-serving serving.knative.openshift.io/system-namespace
 oc label namespace knative-serving-ingress serving.knative.openshift.io/system-namespace=true
 ```
 
-## Enable AWS STS Integration
+## Enable AWS STS Integration (AWS Specific)
 
 This is needed only when running in AWS and allows to use workload related credentials (as opposed to individual related), with short lived tokens.
 
-Prepare OIDC endpoint
+### Prepare OIDC endpoint
 
 ```shell
 oc get -n openshift-kube-apiserver cm -o json bound-sa-token-signing-certs | jq -r '.data["service-account-001.pub"]' > /tmp/sa-signer-pkcs8.pub
@@ -133,7 +139,7 @@ aws s3api put-object-acl --bucket oidc-discovery-${cluster_name} --key '.well-kn
 oc patch authentication.config.openshift.io cluster --type "json" -p="[{\"op\": \"replace\", \"path\": \"/spec/serviceAccountIssuer\", \"value\":\"${oidc_url}\"}]"
 ```
 
-Establish STS trust
+### Establish STS trust
 
 ```shell
 export policy_arn=$(aws iam create-policy --policy-name AllowS3Access --policy-document file://./aws-sts/aws-s3-access-policy.json | jq -r .Policy.Arn)
@@ -146,7 +152,7 @@ export role_arn=$(aws iam create-role --role-name s3-access --assume-role-policy
 aws iam attach-role-policy --role-name s3-access --policy-arn ${policy_arn}
 ```
 
-Configure sts injection
+### Configure sts injection
 
 ```shell
 export role_arn=$(aws iam get-role --role-name s3-access | jq -r .Role.Arn)
@@ -166,11 +172,14 @@ oc adm policy add-scc-to-user anyuid -z kubeflow-pipelines-cache-deployer-sa -n 
 oc adm policy add-scc-to-user anyuid -z xgboost-operator-service-account -n kubeflow
 ```
 
-deploy kubeflow
+## Deploy kubeflow
 
 ```shell
-./kustomize --load-restrictor=LoadRestrictionsNone build ./kubeflow1.3 | oc apply -f -
+kustomize --load_restrictor=none build ./kubeflow1.3 > kustomize-output.yaml
+oc apply -f kustomize-output.yaml 
 ```
+
+
 
 ## Configure automatic profile creation, and profile namespace configuration:
 
@@ -181,16 +190,22 @@ envsubst < ./openshift/kubeflow-profile-creation.yaml | oc apply -f -
 envsubst < ./openshift/kubeflow-profile-namespace-config.yaml | oc apply -f -
 ```
 
+## Login to the Kubeflow UI
+```shell
+oc get routes secure-kubeflow -n istio-system
+```
+
+
 ## Kubeflow serving: kfserving
 
-Position yourself in a user namespace
+### Position yourself in a user namespace
 
 ```shell
 export namespace=raffa
 oc apply -f ./serving/kfserving/tensorflow/tf-inference.yaml -n ${namespace}
 ```
 
-verifying the result
+### Verifying the result
 
 ```shell
 MODEL_NAME=flowers-sample
